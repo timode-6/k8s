@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: microservices
+  labels:
+    app: auth-service
+    tier: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+        tier: app
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: auth-service
+          image: auth-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/auth_db
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: auth-db-user
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: auth-db-password
+
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: jwt-secret
+            - name: JWT_ACCESS_TOKEN_EXPIRATION
+              value: "3600000"
+            - name: JWT_REFRESH_TOKEN_EXPIRATION
+              value: "86400000"
+
+            - name: GATEWAY_INTERNAL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: gateway-internal-secret
+
+            - name: ADMIN_BOOTSTRAP_ENABLED
+              value: "true"
+            - name: ADMIN_BOOTSTRAP_LOGIN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: admin-bootstrap-login
+            - name: ADMIN_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: admin-bootstrap-password
+            - name: ADMIN_BOOTSTRAP_USER_ID
+              value: "1"
+
+            - name: MANAGEMENT_HEALTH_PROBES_ENABLED
+              value: "true"
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: health,info
+            - name: SPRING_PROFILES_ACTIVE
+              value: k8s
+          resources:
+            requests:
+              cpu: 150m
+              memory: 384Mi
+            limits:
+              cpu: 400m
+              memory: 768Mi
+
+          startupProbe:
+            tcpSocket:
+              port: 8081
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 60
+          readinessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 30

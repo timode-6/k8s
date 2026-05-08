@@ -1,0 +1,8 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: microservice-user
+  namespace: microservices
+spec:
+  authentication:
+    type: scram-sha-512
