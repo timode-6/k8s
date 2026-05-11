@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: microservices
+  labels:
+    app: order-service
+    tier: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+        tier: app
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: order-service
+          image: order-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/order_db"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: order-db-user }
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: order-db-password }
+
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-cluster-kafka-bootstrap:9093"
+            - name: SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: SPRING_KAFKA_PROPERTIES_SASL_MECHANISM
+              value: "SCRAM-SHA-512"
+            - name: SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: microservice-user
+                  key: sasl.jaas.config
+            
+            - name: SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_LOCATION
+              value: "/tmp/kafka/cluster-ca.p12"
+            - name: SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE
+              value: "PKCS12"
+            - name: SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-cluster-ca-cert
+                  key: ca.password
+
+            - name: KAFKA_CONSUMER_GROUP_ID
+              value: "order-service-group"
+            - name: KAFKA_TOPICS_PAYMENT_CREATED
+              value: "payment.created"
+            - name: USER_SERVICE_URL
+              value: "http://user-service:8082"
+            - name: GATEWAY_INTERNAL_SECRET
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: gateway-internal-secret }
+            
+            - name: MANAGEMENT_HEALTH_PROBES_ENABLED
+              value: "true"
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: "health,info"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "k8s"
+          volumeMounts:
+            - name: kafka-ca-cert
+              mountPath: /tmp/kafka
+              readOnly: true
+          resources:
+            requests:
+              cpu: 150m
+              memory: 384Mi
+            limits:
+              cpu: 400m
+              memory: 768Mi
+          startupProbe:
+            tcpSocket: { port: 8083 }
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 8083 }
+            initialDelaySeconds: 60
+          readinessProbe:
+            tcpSocket: { port: 8083 }
+            initialDelaySeconds: 30
+      volumes:
+        - name: kafka-ca-cert
+          secret:
+            secretName: kafka-cluster-cluster-ca-cert
+            items:
+              - key: ca.p12
+                path: cluster-ca.p12
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: microservices
+spec:
+  type: ClusterIP
+  selector:
+    app: order-service
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083

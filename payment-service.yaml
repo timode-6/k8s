@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: microservices
+  labels:
+    app: payment-service
+    tier: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        tier: app
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: payment-service
+          image: payment-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8084
+          env:
+            - name: MONGODB_ROOT_USER
+              valueFrom:
+                secretKeyRef: {name: postgres-credentials, key: mongodb-root-username}
+            - name: MONGODB_ROOT_PASS
+              valueFrom:
+                secretKeyRef: {name: postgres-credentials, key: mongodb-root-password}
+            - name: MONGODB_URI
+              value: "mongodb://$(MONGODB_ROOT_USER):$(MONGODB_ROOT_PASS)@mongodb:27017/payment_db?authSource=admin"
+            - name: MONGODB_DATABASE
+              value: "payment_db"
+
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-cluster-kafka-bootstrap:9093"
+            - name: SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: SPRING_KAFKA_PROPERTIES_SASL_MECHANISM
+              value: "SCRAM-SHA-512"
+            - name: SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: microservice-user
+                  key: sasl.jaas.config
+            
+            - name: SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_LOCATION
+              value: "/tmp/kafka/cluster-ca.p12"
+            - name: SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE
+              value: "PKCS12"
+            - name: SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-cluster-ca-cert
+                  key: ca.password
+
+            - name: KAFKA_TOPICS_PAYMENT_CREATED
+              value: payment.created
+            - name: RANDOM_SERVICE_URL
+              value: http://random-number-service
+            - name: GATEWAY_INTERNAL_SECRET
+              valueFrom:
+                secretKeyRef: {name: app-secrets, key: gateway-internal-secret}
+            - name: MANAGEMENT_HEALTH_PROBES_ENABLED
+              value: "true"
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: health,info
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker   
+          volumeMounts:
+            - name: kafka-ca-cert
+              mountPath: /tmp/kafka
+              readOnly: true
+          resources:
+            requests:
+              cpu: 150m
+              memory: 384Mi
+            limits:
+              cpu: 400m
+              memory: 768Mi
+          startupProbe:
+            tcpSocket:
+              port: 8084 
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8084
+            initialDelaySeconds: 60
+          readinessProbe:
+            tcpSocket:
+              port: 8084
+            initialDelaySeconds: 30
+      volumes:
+        - name: kafka-ca-cert
+          secret:
+            secretName: kafka-cluster-cluster-ca-cert
+            items:
+              - key: ca.p12
+                path: cluster-ca.p12
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: microservices
+  labels:
+    app: payment-service
+spec:
+  type: ClusterIP
+  selector:
+    app: payment-service
+  ports:
+    - name: http
+      port: 8084
+      targetPort: 8084
